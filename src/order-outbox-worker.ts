@@ -2,11 +2,13 @@ import { asc, eq, isNull } from "drizzle-orm";
 import { kafka } from "./kafka.ts";
 import { closeOrderDb, orderDb } from "./order/db.ts";
 import { outbox } from "./order/schema.ts";
+import { tracePrefix } from "./trace.ts";
 
 const POLL_INTERVAL_MS = 1000;
 
 type OrderCreatedPayload = {
   id: string;
+  traceId?: string;
   orderId: number;
   eventId: string;
   seats: number;
@@ -29,6 +31,7 @@ async function publishPendingEvents() {
 
   for (const event of events) {
     const payload = event.payload as OrderCreatedPayload;
+    const trace = tracePrefix(payload.traceId ?? "missing-trace-id");
 
     await producer.send({
       topic: event.topic,
@@ -45,7 +48,7 @@ async function publishPendingEvents() {
       .set({ publishedAt: new Date() })
       .where(eq(outbox.id, event.id));
 
-    console.log(`Published ${event.eventType} outbox event ${event.id} for order ${payload.orderId}`);
+    console.log(`${trace} Published ${event.eventType} outbox event ${event.id} for order ${payload.orderId}`);
   }
 }
 

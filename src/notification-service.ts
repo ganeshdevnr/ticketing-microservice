@@ -1,9 +1,11 @@
 import { kafka, ORDER_CREATED_TOPIC } from "./kafka.ts";
 import { notificationDb } from "./notification/db.ts";
 import { processedEvents } from "./notification/schema.ts";
+import { tracePrefix } from "./trace.ts";
 
 type OrderCreatedEvent = {
   id: string;
+  traceId?: string;
   orderId: number;
   eventId: string;
   seats: number;
@@ -23,6 +25,7 @@ await consumer.run({
     }
 
     const event = JSON.parse(message.value.toString()) as OrderCreatedEvent;
+    const trace = tracePrefix(event.traceId ?? "missing-trace-id");
 
     await notificationDb.transaction(async (tx) => {
       const [processedEvent] = await tx
@@ -32,11 +35,11 @@ await consumer.run({
         .returning({ eventId: processedEvents.eventId });
 
       if (!processedEvent) {
-        console.log("duplicate, ignoring");
+        console.log(`${trace} duplicate OrderCreated event ${event.id}, ignoring`);
         return;
       }
 
-      console.log(`sending confirmation for order ${event.orderId}`);
+      console.log(`${trace} sending confirmation for order ${event.orderId}`);
     });
   }
 });

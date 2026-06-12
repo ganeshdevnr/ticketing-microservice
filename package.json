@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "listing": "node src/listing-service.ts",
+    "gateway": "node src/gateway-service.ts",
     "order": "node src/order-service.ts",
     "order:outbox": "node src/order-outbox-worker.ts",
     "payment": "node src/payment-service.ts",
