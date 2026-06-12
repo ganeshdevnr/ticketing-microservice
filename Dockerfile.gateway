@@ -1,0 +1,17 @@
+FROM node:24-slim AS builder
+WORKDIR /app
+COPY package*.json tsconfig.json ./
+COPY src ./src
+COPY proto ./proto
+COPY drizzle.*.config.ts ./
+RUN npm ci
+RUN npm run build
+
+FROM node:24-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/proto ./dist/proto
+CMD ["npm", "run", "start:gateway"]

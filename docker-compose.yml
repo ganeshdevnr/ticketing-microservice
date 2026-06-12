@@ -1,0 +1,166 @@
+services:
+  listing-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: listing_service_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d listing_service_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - listing-db-data:/var/lib/postgresql/data
+
+  order-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: order_service_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d order_service_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - order-db-data:/var/lib/postgresql/data
+
+  notification-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: notification_service_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d notification_service_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - notification-db-data:/var/lib/postgresql/data
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.7
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health -X brokers=redpanda:9092 | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  db-setup:
+    build:
+      context: .
+      dockerfile: Dockerfile.order
+      target: builder
+    environment:
+      LISTING_DATABASE_URL: postgres://postgres:postgres@listing-db:5432/listing_service_db
+      ORDER_DATABASE_URL: postgres://postgres:postgres@order-db:5432/order_service_db
+      NOTIFICATION_DATABASE_URL: postgres://postgres:postgres@notification-db:5432/notification_service_db
+    command: sh -c "npm run db:push && npm run db:seed:listing"
+    depends_on:
+      listing-db:
+        condition: service_healthy
+      order-db:
+        condition: service_healthy
+      notification-db:
+        condition: service_healthy
+
+  listing:
+    build:
+      context: .
+      dockerfile: Dockerfile.listing
+    environment:
+      LISTING_DATABASE_URL: postgres://postgres:postgres@listing-db:5432/listing_service_db
+      LISTING_GRPC_BIND_ADDRESS: 0.0.0.0:50051
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+
+  payment:
+    build:
+      context: .
+      dockerfile: Dockerfile.payment
+    environment:
+      PAYMENT_GRPC_BIND_ADDRESS: 0.0.0.0:50052
+
+  order:
+    build:
+      context: .
+      dockerfile: Dockerfile.order
+    environment:
+      PORT: 3001
+      ORDER_DATABASE_URL: postgres://postgres:postgres@order-db:5432/order_service_db
+      LISTING_SERVICE_ADDRESS: listing:50051
+      PAYMENT_SERVICE_ADDRESS: payment:50052
+      ORDER_AMOUNT: 100
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+      listing:
+        condition: service_started
+      payment:
+        condition: service_started
+
+  order-outbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.order
+    command: npm run start:order-outbox
+    environment:
+      ORDER_DATABASE_URL: postgres://postgres:postgres@order-db:5432/order_service_db
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+
+  notification:
+    build:
+      context: .
+      dockerfile: Dockerfile.notification
+    environment:
+      NOTIFICATION_DATABASE_URL: postgres://postgres:postgres@notification-db:5432/notification_service_db
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      db-setup:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    environment:
+      PORT: 3000
+      ORDER_SERVICE_URL: http://order:3001/orders
+    ports:
+      - "3000:3000"
+    depends_on:
+      order:
+        condition: service_started
+
+volumes:
+  listing-db-data:
+  order-db-data:
+  notification-db-data:

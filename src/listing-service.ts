@@ -10,7 +10,7 @@ import { getGrpcTraceId, tracePrefix } from "./trace.ts";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROTO_PATH = path.join(__dirname, "../proto/listing.proto");
-const SERVER_ADDRESS = "localhost:50051";
+const SERVER_ADDRESS = process.env.LISTING_GRPC_BIND_ADDRESS ?? "localhost:50051";
 
 
 // Defining the types for the request and response of the CheckAvailability RPC method.

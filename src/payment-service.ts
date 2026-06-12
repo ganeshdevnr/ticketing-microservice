@@ -7,7 +7,7 @@ import { getGrpcTraceId, tracePrefix } from "./trace.ts";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROTO_PATH = path.join(__dirname, "../proto/payment.proto");
-const SERVER_ADDRESS = "localhost:50052";
+const SERVER_ADDRESS = process.env.PAYMENT_GRPC_BIND_ADDRESS ?? "localhost:50052";
 
 type ChargeRequest = {
   orderId: number;

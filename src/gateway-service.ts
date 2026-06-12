@@ -2,8 +2,8 @@ import http from "node:http";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { newTraceId, TRACE_HEADER, tracePrefix } from "./trace.ts";
 
-const SERVER_PORT = 3000;
-const ORDER_SERVICE_URL = "http://localhost:3001/orders";
+const SERVER_PORT = Number(process.env.PORT ?? 3000);
+const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL ?? "http://localhost:3001/orders";
 const JWT_SECRET = "dev-gateway-secret";
 
 type TokenPayload = {
@@ -151,5 +151,5 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(SERVER_PORT, () => {
-  console.log(`Gateway listening on http://localhost:${SERVER_PORT}`);
+  console.log(`Gateway listening on port ${SERVER_PORT}`);
 });

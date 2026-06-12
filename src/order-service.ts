@@ -14,9 +14,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const LISTING_PROTO_PATH = path.join(__dirname, "../proto/listing.proto");
 const PAYMENT_PROTO_PATH = path.join(__dirname, "../proto/payment.proto");
-const LISTING_SERVICE_ADDRESS = "localhost:50051";
-const PAYMENT_SERVICE_ADDRESS = "localhost:50052";
-const SERVER_PORT = 3001;
+const LISTING_SERVICE_ADDRESS = process.env.LISTING_SERVICE_ADDRESS ?? "localhost:50051";
+const PAYMENT_SERVICE_ADDRESS = process.env.PAYMENT_SERVICE_ADDRESS ?? "localhost:50052";
+const SERVER_PORT = Number(process.env.PORT ?? 3001);
 const EVENT_ID_TO_CHECK = "event-3";
 const SEATS_TO_RESERVE = 1;
 const ORDER_AMOUNT = Number(process.env.ORDER_AMOUNT ?? 100);
@@ -264,7 +264,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(SERVER_PORT, () => {
-  console.log(`Order service HTTP API listening on http://localhost:${SERVER_PORT}`);
+  console.log(`Order service HTTP API listening on port ${SERVER_PORT}`);
 });
 
 async function shutdown() {
