@@ -2,15 +2,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
-import { kafka, ORDER_CREATED_TOPIC } from "./kafka.ts";
 import { closeOrderDb, orderDb } from "./order/db.ts";
-import { orders } from "./order/schema.ts";
+import { orders, outbox } from "./order/schema.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROTO_PATH = path.join(__dirname, "../proto/listing.proto");
 const LISTING_SERVICE_ADDRESS = "localhost:50051";
 const EVENT_ID_TO_CHECK = "event-1";
+const ORDER_CREATED_TOPIC = "order-created";
 
 type CheckAvailabilityRequest = {
   eventId: string;
@@ -50,10 +50,6 @@ const listingClient = new listingProto.listing.ListingService(
   grpc.credentials.createInsecure()
 );
 
-const producer = kafka.producer();
-
-await producer.connect();
-
 // Client-side call to the CheckAvailability RPC implemented by Listing service.
 listingClient.CheckAvailability({ eventId: EVENT_ID_TO_CHECK }, async (error, response) => {
   try {
@@ -74,43 +70,39 @@ listingClient.CheckAvailability({ eventId: EVENT_ID_TO_CHECK }, async (error, re
 
     const status = response.available ? "created" : "rejected_no_seats";
 
-    // Order service writes only to its own database.
-    const [order] = await orderDb
-      .insert(orders)
-      .values({
-        eventId: EVENT_ID_TO_CHECK,
-        status
-      })
-      .returning({ id: orders.id, status: orders.status });
+    const order = await orderDb.transaction(async (tx) => {
+      // Order service writes the order and event atomically to its own database.
+      const [storedOrder] = await tx
+        .insert(orders)
+        .values({
+          eventId: EVENT_ID_TO_CHECK,
+          status
+        })
+        .returning({ id: orders.id, status: orders.status });
 
-    if (!order) {
-      console.error("Order service did not receive a stored order response.");
-      return;
-    }
+      if (!storedOrder) {
+        throw new Error("Order service did not receive a stored order response.");
+      }
+
+      await tx.insert(outbox).values({
+        topic: ORDER_CREATED_TOPIC,
+        eventType: "OrderCreated",
+        payload: {
+          orderId: storedOrder.id,
+          eventId: EVENT_ID_TO_CHECK,
+          seats: response.availableSeats
+        }
+      });
+
+      return storedOrder;
+    });
 
     console.log(`Order stored in Order service database with id: ${order.id}`);
     console.log(`Order status: ${order.status}`);
-
-    // Naive event publishing for this step: DB save first, Kafka publish second.
-    await producer.send({
-      topic: ORDER_CREATED_TOPIC,
-      messages: [
-        {
-          key: String(order.id),
-          value: JSON.stringify({
-            orderId: order.id,
-            eventId: EVENT_ID_TO_CHECK,
-            seats: response.availableSeats
-          })
-        }
-      ]
-    });
-
-    console.log(`Published OrderCreated event for order ${order.id}`);
+    console.log(`Stored OrderCreated outbox event for order ${order.id}`);
   } catch (dbError) {
     console.error("Order service failed:", dbError);
   } finally {
-    await producer.disconnect();
     await closeOrderDb();
     listingClient.close();
   }
