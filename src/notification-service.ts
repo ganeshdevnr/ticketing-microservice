@@ -1,6 +1,9 @@
 import { kafka, ORDER_CREATED_TOPIC } from "./kafka.ts";
+import { notificationDb } from "./notification/db.ts";
+import { processedEvents } from "./notification/schema.ts";
 
 type OrderCreatedEvent = {
+  id: string;
   orderId: number;
   eventId: string;
   seats: number;
@@ -21,7 +24,19 @@ await consumer.run({
 
     const event = JSON.parse(message.value.toString()) as OrderCreatedEvent;
 
-    // Notification service has no database in this step; it only reacts to the event.
-    console.log(`sending confirmation for order ${event.orderId}`);
+    await notificationDb.transaction(async (tx) => {
+      const [processedEvent] = await tx
+        .insert(processedEvents)
+        .values({ eventId: event.id })
+        .onConflictDoNothing()
+        .returning({ eventId: processedEvents.eventId });
+
+      if (!processedEvent) {
+        console.log("duplicate, ignoring");
+        return;
+      }
+
+      console.log(`sending confirmation for order ${event.orderId}`);
+    });
   }
 });

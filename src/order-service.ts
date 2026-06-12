@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
@@ -88,6 +89,7 @@ listingClient.CheckAvailability({ eventId: EVENT_ID_TO_CHECK }, async (error, re
         topic: ORDER_CREATED_TOPIC,
         eventType: "OrderCreated",
         payload: {
+          id: randomUUID(),
           orderId: storedOrder.id,
           eventId: EVENT_ID_TO_CHECK,
           seats: response.availableSeats

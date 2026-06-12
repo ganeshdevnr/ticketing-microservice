@@ -6,6 +6,7 @@ import { outbox } from "./order/schema.ts";
 const POLL_INTERVAL_MS = 1000;
 
 type OrderCreatedPayload = {
+  id: string;
   orderId: number;
   eventId: string;
   seats: number;
