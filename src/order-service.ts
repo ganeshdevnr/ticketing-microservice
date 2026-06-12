@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import { kafka, ORDER_CREATED_TOPIC } from "./kafka.ts";
 import { closeOrderDb, orderDb } from "./order/db.ts";
 import { orders } from "./order/schema.ts";
 
@@ -49,6 +50,10 @@ const listingClient = new listingProto.listing.ListingService(
   grpc.credentials.createInsecure()
 );
 
+const producer = kafka.producer();
+
+await producer.connect();
+
 // Client-side call to the CheckAvailability RPC implemented by Listing service.
 listingClient.CheckAvailability({ eventId: EVENT_ID_TO_CHECK }, async (error, response) => {
   try {
@@ -85,9 +90,27 @@ listingClient.CheckAvailability({ eventId: EVENT_ID_TO_CHECK }, async (error, re
 
     console.log(`Order stored in Order service database with id: ${order.id}`);
     console.log(`Order status: ${order.status}`);
+
+    // Naive event publishing for this step: DB save first, Kafka publish second.
+    await producer.send({
+      topic: ORDER_CREATED_TOPIC,
+      messages: [
+        {
+          key: String(order.id),
+          value: JSON.stringify({
+            orderId: order.id,
+            eventId: EVENT_ID_TO_CHECK,
+            seats: response.availableSeats
+          })
+        }
+      ]
+    });
+
+    console.log(`Published OrderCreated event for order ${order.id}`);
   } catch (dbError) {
-    console.error("Order service failed to store order:", dbError);
+    console.error("Order service failed:", dbError);
   } finally {
+    await producer.disconnect();
     await closeOrderDb();
     listingClient.close();
   }

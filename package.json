@@ -6,6 +6,8 @@
   "scripts": {
     "listing": "node src/listing-service.ts",
     "order": "node src/order-service.ts",
+    "notification": "node src/notification-service.ts",
+    "redpanda": "bash scripts/start-redpanda.sh",
     "db:generate:listing": "drizzle-kit generate --config=drizzle.listing.config.ts",
     "db:generate:order": "drizzle-kit generate --config=drizzle.order.config.ts",
     "db:generate": "npm run db:generate:listing && npm run db:generate:order",
@@ -23,6 +25,7 @@
     "@grpc/proto-loader": "^0.7.15",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.44.2",
+    "kafkajs": "^2.2.4",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
