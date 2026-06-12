@@ -7,6 +7,7 @@
     "listing": "node src/listing-service.ts",
     "order": "node src/order-service.ts",
     "order:outbox": "node src/order-outbox-worker.ts",
+    "payment": "node src/payment-service.ts",
     "notification": "node src/notification-service.ts",
     "redpanda": "bash scripts/start-redpanda.sh",
     "db:generate:listing": "drizzle-kit generate --config=drizzle.listing.config.ts",

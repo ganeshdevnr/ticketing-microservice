@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package payment;
+
+service PaymentService {
+  rpc Charge (ChargeRequest) returns (ChargeResponse);
+}
+
+message ChargeRequest {
+  int32 orderId = 1;
+  int32 amount = 2;
+}
+
+message ChargeResponse {
+  bool charged = 1;
+  string reason = 2;
+}

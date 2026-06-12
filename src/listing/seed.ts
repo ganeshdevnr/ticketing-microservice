@@ -14,7 +14,8 @@ try {
     .onConflictDoUpdate({
       target: events.eventId,
       set: {
-        availableSeats: sql`excluded.available_seats`
+        availableSeats: sql`excluded.available_seats`,
+        reservedSeats: 0
       }
     });
 

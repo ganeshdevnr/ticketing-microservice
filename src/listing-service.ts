@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
-import { eq } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { listingDb } from "./listing/db.ts";
 import { events } from "./listing/schema.ts";
 
@@ -19,6 +19,26 @@ type CheckAvailabilityRequest = {
 
 type CheckAvailabilityResponse = {
   available: boolean;
+  availableSeats: number;
+};
+
+type ReserveSeatsRequest = {
+  eventId: string;
+  seats: number;
+};
+
+type ReserveSeatsResponse = {
+  reserved: boolean;
+  availableSeats: number;
+};
+
+type ReleaseSeatsRequest = {
+  eventId: string;
+  seats: number;
+};
+
+type ReleaseSeatsResponse = {
+  released: boolean;
   availableSeats: number;
 };
 
@@ -62,6 +82,64 @@ async function checkAvailability(
   }
 }
 
+async function reserveSeats(
+  call: grpc.ServerUnaryCall<ReserveSeatsRequest, ReserveSeatsResponse>,
+  callback: grpc.sendUnaryData<ReserveSeatsResponse>
+) {
+  try {
+    const [event] = await listingDb
+      .update(events)
+      .set({
+        availableSeats: sql`${events.availableSeats} - ${call.request.seats}`,
+        reservedSeats: sql`${events.reservedSeats} + ${call.request.seats}`
+      })
+      .where(and(eq(events.eventId, call.request.eventId), gte(events.availableSeats, call.request.seats)))
+      .returning({ availableSeats: events.availableSeats });
+
+    if (event) {
+      console.log(`reserved seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
+    } else {
+      console.log(`failed to reserve seats for event ${call.request.eventId}`);
+    }
+
+    callback(null, {
+      reserved: Boolean(event),
+      availableSeats: event?.availableSeats ?? 0
+    });
+  } catch (error) {
+    callback(error as Error);
+  }
+}
+
+async function releaseSeats(
+  call: grpc.ServerUnaryCall<ReleaseSeatsRequest, ReleaseSeatsResponse>,
+  callback: grpc.sendUnaryData<ReleaseSeatsResponse>
+) {
+  try {
+    const [event] = await listingDb
+      .update(events)
+      .set({
+        availableSeats: sql`${events.availableSeats} + ${call.request.seats}`,
+        reservedSeats: sql`${events.reservedSeats} - ${call.request.seats}`
+      })
+      .where(and(eq(events.eventId, call.request.eventId), gte(events.reservedSeats, call.request.seats)))
+      .returning({ availableSeats: events.availableSeats });
+
+    if (event) {
+      console.log(`released seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
+    } else {
+      console.log(`failed to release seats for event ${call.request.eventId}`);
+    }
+
+    callback(null, {
+      released: Boolean(event),
+      availableSeats: event?.availableSeats ?? 0
+    });
+  } catch (error) {
+    callback(error as Error);
+  }
+}
+
 // Create a new gRPC server
 const server = new grpc.Server();
 
@@ -69,7 +147,9 @@ const server = new grpc.Server();
 // Register the ListingService with the server, providing the implementation of CheckAvailability.
 // Listing service owns the server side of this contract.
 server.addService(listingProto.listing.ListingService.service, {
-  CheckAvailability: checkAvailability
+  CheckAvailability: checkAvailability,
+  ReserveSeats: reserveSeats,
+  ReleaseSeats: releaseSeats
 });
 
 server.bindAsync(SERVER_ADDRESS, grpc.ServerCredentials.createInsecure(), (error, port) => {

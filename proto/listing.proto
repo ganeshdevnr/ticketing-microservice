@@ -8,6 +8,8 @@ package listing;
 service ListingService {
   // Checks whether one event has seats available.
   rpc CheckAvailability (CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
+  rpc ReserveSeats (ReserveSeatsRequest) returns (ReserveSeatsResponse);
+  rpc ReleaseSeats (ReleaseSeatsRequest) returns (ReleaseSeatsResponse);
 }
 
 // Request message sent by the Order service client.
@@ -18,5 +20,25 @@ message CheckAvailabilityRequest {
 // Response message returned by the Listing service server.
 message CheckAvailabilityResponse {
   bool available = 1;
+  int32 availableSeats = 2;
+}
+
+message ReserveSeatsRequest {
+  string eventId = 1;
+  int32 seats = 2;
+}
+
+message ReserveSeatsResponse {
+  bool reserved = 1;
+  int32 availableSeats = 2;
+}
+
+message ReleaseSeatsRequest {
+  string eventId = 1;
+  int32 seats = 2;
+}
+
+message ReleaseSeatsResponse {
+  bool released = 1;
   int32 availableSeats = 2;
 }
