@@ -1,0 +1,63 @@
+protos:
+  - id: order
+    content: |
+      syntax = "proto3";
+
+      package order;
+
+      service OrderService {
+        rpc PlaceOrder (PlaceOrderRequest) returns (PlaceOrderResponse);
+      }
+
+      message PlaceOrderRequest {
+        int32 order_id = 1;
+      }
+
+      message PlaceOrderResponse {
+        int32 orderId = 1;
+        string status = 2;
+      }
+
+services:
+  - id: order-service
+    plugins:
+      openid-connect:
+        client_id: ${{KEYCLOAK_CLIENT_ID:=ticketing-app}}
+        client_secret: ${{KEYCLOAK_CLIENT_SECRET:=qihxyWCo3XoBK0jwN6WxqCfmbWjm4WXt}}
+        discovery: ${{KEYCLOAK_DISCOVERY_URL:=http://keycloak:8080/realms/ticketing/.well-known/openid-configuration}}
+        realm: ticketing
+        bearer_only: true
+        use_jwks: true
+        token_signing_alg_values_expected: RS256
+        claim_validator:
+          issuer:
+            valid_issuers:
+              - http://localhost:8080/realms/ticketing
+        ssl_verify: false
+        unauth_action: deny
+        set_access_token_header: false
+        set_id_token_header: false
+        set_userinfo_header: true
+      serverless-pre-function:
+        phase: before_proxy
+        functions:
+          - >-
+            return function(conf, ctx) local userinfo = ngx.var.http_x_userinfo; if not userinfo then return ngx.exit(401) end; local decoded = ngx.decode_base64(userinfo); if not decoded then return ngx.exit(401) end; local cjson = require('cjson.safe'); local claims = cjson.decode(decoded); if not claims or type(claims.sub) ~= 'string' or claims.sub == '' then return ngx.exit(401) end; ngx.req.set_header('X-User-ID', claims.sub); ngx.req.clear_header('X-Userinfo') end
+    upstream:
+      scheme: grpc
+      type: roundrobin
+      nodes:
+        "${{ORDER_GRPC_UPSTREAM:=order:50053}}": 1
+
+routes:
+  - id: order-post
+    uri: /orders
+    methods:
+      - POST
+    service_id: order-service
+    plugins:
+      grpc-transcode:
+        proto_id: order
+        service: order.OrderService
+        method: PlaceOrder
+#END

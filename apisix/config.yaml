@@ -1,0 +1,12 @@
+apisix:
+  node_listen: 9080
+
+plugins:
+  - openid-connect
+  - grpc-transcode
+  - serverless-pre-function
+
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml

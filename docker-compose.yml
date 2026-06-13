@@ -71,6 +71,19 @@ services:
       keycloak-db:
         condition: service_healthy
 
+  apisix:
+    image: apache/apisix:3.13.0-debian
+    environment:
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-ticketing-app}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-qihxyWCo3XoBK0jwN6WxqCfmbWjm4WXt}
+      KEYCLOAK_DISCOVERY_URL: http://keycloak:8080/realms/ticketing/.well-known/openid-configuration
+      ORDER_GRPC_UPSTREAM: order:50053
+    ports:
+      - "9080:9080"
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v24.3.7
     command:
@@ -176,19 +189,6 @@ services:
         condition: service_completed_successfully
       redpanda:
         condition: service_healthy
-
-  gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile.gateway
-    environment:
-      PORT: 3000
-      ORDER_SERVICE_ADDRESS: order:50053
-    ports:
-      - "3000:3000"
-    depends_on:
-      order:
-        condition: service_started
 
 volumes:
   listing-db-data:

@@ -251,15 +251,21 @@ async function createOrder(userId: string, traceId: string) {
   }
 }
 
+function getUserIdFromMetadata(metadata: grpc.Metadata): string | undefined {
+  const userId = metadata.get("x-user-id")[0];
+
+  return typeof userId === "string" && userId.length > 0 ? userId : undefined;
+}
+
 async function placeOrder(
   call: grpc.ServerUnaryCall<PlaceOrderRequest, PlaceOrderResponse>,
   callback: grpc.sendUnaryData<PlaceOrderResponse>
 ) {
-  const userId = call.metadata.get("user_id")[0];
+  const userId = getUserIdFromMetadata(call.metadata);
   const traceId = getGrpcTraceId(call);
   const trace = tracePrefix(traceId);
 
-  if (typeof userId !== "string" || userId.length === 0) {
+  if (!userId) {
     console.error(`${trace} Rejected order request: missing X-User-ID header`);
     callback({ code: grpc.status.UNAUTHENTICATED, message: "missing X-User-ID" });
     return;

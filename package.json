@@ -6,13 +6,11 @@
   "scripts": {
     "build": "tsc",
     "listing": "node src/listing-service.ts",
-    "gateway": "node src/gateway-service.ts",
     "order": "node src/order-service.ts",
     "order:outbox": "node src/order-outbox-worker.ts",
     "payment": "node src/payment-service.ts",
     "notification": "node src/notification-service.ts",
     "start:listing": "node dist/src/listing-service.js",
-    "start:gateway": "node dist/src/gateway-service.js",
     "start:order": "node dist/src/order-service.js",
     "start:order-outbox": "node dist/src/order-outbox-worker.js",
     "start:payment": "node dist/src/payment-service.js",
