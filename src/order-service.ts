@@ -1,5 +1,4 @@
 import "dotenv/config";
-import http from "node:http";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,15 +7,16 @@ import * as protoLoader from "@grpc/proto-loader";
 import { eq } from "drizzle-orm";
 import { closeOrderDb, orderDb } from "./order/db.ts";
 import { orders, outbox } from "./order/schema.ts";
-import { grpcTraceMetadata, TRACE_HEADER, tracePrefix } from "./trace.ts";
+import { getGrpcTraceId, grpcTraceMetadata, tracePrefix } from "./trace.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const ORDER_PROTO_PATH = path.join(__dirname, "../proto/order.proto");
 const LISTING_PROTO_PATH = path.join(__dirname, "../proto/listing.proto");
 const PAYMENT_PROTO_PATH = path.join(__dirname, "../proto/payment.proto");
+const ORDER_SERVER_ADDRESS = process.env.ORDER_GRPC_BIND_ADDRESS ?? "0.0.0.0:50053";
 const LISTING_SERVICE_ADDRESS = process.env.LISTING_SERVICE_ADDRESS ?? "localhost:50051";
 const PAYMENT_SERVICE_ADDRESS = process.env.PAYMENT_SERVICE_ADDRESS ?? "localhost:50052";
-const SERVER_PORT = Number(process.env.PORT ?? 3001);
 const EVENT_ID_TO_CHECK = "event-3";
 const SEATS_TO_RESERVE = 1;
 const ORDER_AMOUNT = Number(process.env.ORDER_AMOUNT ?? 100);
@@ -52,6 +52,15 @@ type ChargeResponse = {
   reason: string;
 };
 
+type PlaceOrderRequest = {
+  order_id: number;
+};
+
+type PlaceOrderResponse = {
+  orderId: number;
+  status: string;
+};
+
 type ListingServiceClient = grpc.Client & {
   ReserveSeats: (
     request: ReserveSeatsRequest,
@@ -67,6 +76,12 @@ type ListingServiceClient = grpc.Client & {
 
 type PaymentServiceClient = grpc.Client & {
   Charge: (request: ChargeRequest, metadata: grpc.Metadata, callback: grpc.requestCallback<ChargeResponse>) => void;
+};
+
+type OrderProto = {
+  order: {
+    OrderService: grpc.ServiceClientConstructor;
+  };
 };
 
 type ListingProto = {
@@ -88,6 +103,10 @@ const protoLoaderOptions = {
   defaults: true,
   oneofs: true
 };
+
+const orderProto = grpc.loadPackageDefinition(
+  protoLoader.loadSync(ORDER_PROTO_PATH, protoLoaderOptions)
+) as unknown as OrderProto;
 
 const listingProto = grpc.loadPackageDefinition(
   protoLoader.loadSync(LISTING_PROTO_PATH, protoLoaderOptions)
@@ -232,44 +251,50 @@ async function createOrder(userId: string, traceId: string) {
   }
 }
 
-// Create a http server to handle incoming order requests from the Gateway service
-const server = http.createServer(async (request, response) => {
-  if (request.method !== "POST" || request.url !== "/orders") {
-    response.writeHead(404, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: "not found" }));
-    return;
-  }
-
-  const userId = request.headers["x-user-id"];
-  const traceHeader = request.headers[TRACE_HEADER];
-  const traceId = typeof traceHeader === "string" && traceHeader.length > 0 ? traceHeader : "missing-trace-id";
+async function placeOrder(
+  call: grpc.ServerUnaryCall<PlaceOrderRequest, PlaceOrderResponse>,
+  callback: grpc.sendUnaryData<PlaceOrderResponse>
+) {
+  const userId = call.metadata.get("user_id")[0];
+  const traceId = getGrpcTraceId(call);
   const trace = tracePrefix(traceId);
 
   if (typeof userId !== "string" || userId.length === 0) {
     console.error(`${trace} Rejected order request: missing X-User-ID header`);
-    response.writeHead(401, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: "missing X-User-ID" }));
+    callback({ code: grpc.status.UNAUTHENTICATED, message: "missing X-User-ID" });
     return;
   }
 
   try {
     const result = await createOrder(userId, traceId);
 
-    response.writeHead(201, { "Content-Type": "application/json" });
-    response.end(JSON.stringify(result));
+    callback(null, result);
   } catch (error) {
     console.error(`${trace} Order saga failed:`, error);
-    response.writeHead(500, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: "order failed" }));
+    callback({ code: grpc.status.INTERNAL, message: "order failed" });
   }
+}
+
+const server = new grpc.Server();
+
+server.addService(orderProto.order.OrderService.service, {
+  PlaceOrder: placeOrder
 });
 
-server.listen(SERVER_PORT, () => {
-  console.log(`Order service HTTP API listening on port ${SERVER_PORT}`);
+server.bindAsync(ORDER_SERVER_ADDRESS, grpc.ServerCredentials.createInsecure(), (error, port) => {
+  if (error) {
+    console.error("Failed to start Order service:", error);
+    return;
+  }
+
+  console.log(`Order service listening on ${ORDER_SERVER_ADDRESS}`);
+  console.log(`gRPC server bound to port ${port}`);
 });
 
 async function shutdown() {
-  server.close();
+  await new Promise<void>((resolve) => {
+    server.tryShutdown(() => resolve());
+  });
   listingClient.close();
   paymentClient.close();
   await closeOrderDb();

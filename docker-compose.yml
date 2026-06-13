@@ -107,7 +107,7 @@ services:
       context: .
       dockerfile: Dockerfile.order
     environment:
-      PORT: 3001
+      ORDER_GRPC_BIND_ADDRESS: 0.0.0.0:50053
       ORDER_DATABASE_URL: postgres://postgres:postgres@order-db:5432/order_service_db
       LISTING_SERVICE_ADDRESS: listing:50051
       PAYMENT_SERVICE_ADDRESS: payment:50052
@@ -153,7 +153,7 @@ services:
       dockerfile: Dockerfile.gateway
     environment:
       PORT: 3000
-      ORDER_SERVICE_URL: http://order:3001/orders
+      ORDER_SERVICE_ADDRESS: order:50053
     ports:
       - "3000:3000"
     depends_on:
