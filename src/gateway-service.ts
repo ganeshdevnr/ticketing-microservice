@@ -80,7 +80,7 @@ async function forwardToOrder(userId: string, body: string, traceId: string) {
     headers: {
       "Content-Type": "application/json",
       "X-User-ID": userId,
-      [TRACE_HEADER]: traceId
+      [TRACE_HEADER]: traceId // [trace=${traceId}] will be included in logs of the Order service for observability across services
     },
     body
   });
@@ -108,8 +108,10 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && request.url === "/orders") {
+    // Tracing for observability
     const traceId = newTraceId();
     const trace = tracePrefix(traceId);
+
     const authorization = request.headers.authorization;
     const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
     const userId = verifyToken(token);
@@ -128,6 +130,8 @@ const server = http.createServer(async (request, response) => {
     let orderResponse: Response;
 
     try {
+
+      // forward the incoming request to the Order service, including the trace ID for observability across services
       console.log(`${trace} Gateway forwarding order request to Order service`);
       orderResponse = await forwardToOrder(userId, body, traceId);
     } catch (error) {

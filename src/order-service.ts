@@ -232,6 +232,7 @@ async function createOrder(userId: string, traceId: string) {
   }
 }
 
+// Create a http server to handle incoming order requests from the Gateway service
 const server = http.createServer(async (request, response) => {
   if (request.method !== "POST" || request.url !== "/orders") {
     response.writeHead(404, { "Content-Type": "application/json" });
