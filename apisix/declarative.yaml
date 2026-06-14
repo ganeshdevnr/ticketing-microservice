@@ -18,8 +18,8 @@ services:
         - host: order
           port: 50053
           weight: 1
-    plugins:
-      openid-connect:
+    plugins: &svc-plugins
+      openid-connect: &oidc-config
         client_id: ${KEYCLOAK_CLIENT_ID}
         client_secret: ${KEYCLOAK_CLIENT_SECRET}
         discovery: ${KEYCLOAK_DISCOVERY_URL}
@@ -36,11 +36,11 @@ services:
         set_access_token_header: false
         set_id_token_header: false
         set_userinfo_header: true
-      serverless-pre-function:
+      serverless-pre-function: &prefn-config
         phase: before_proxy
         functions:
           - 'return function(conf, ctx) local userinfo = ngx.var.http_x_userinfo; if not userinfo then return ngx.exit(401) end; local decoded = ngx.decode_base64(userinfo); if not decoded then return ngx.exit(401) end; local cjson = require("cjson.safe"); local claims = cjson.decode(decoded); if not claims or type(claims.sub) ~= "string" or claims.sub == "" then return ngx.exit(401) end; ngx.req.set_header("X-User-ID", claims.sub); ngx.req.clear_header("X-Userinfo") end'
-      opentelemetry:
+      opentelemetry: &otel-config
         sampler:
           name: always_on
     routes:
@@ -54,3 +54,26 @@ services:
             proto_id: combined
             service: order.OrderService
             method: PlaceOrder
+
+  - name: listing-service
+    description: Listing service gRPC proxy
+    upstream:
+      name: listing-upstream
+      scheme: grpc
+      type: roundrobin
+      nodes:
+        - host: listing
+          port: 50051
+          weight: 1
+    plugins: *svc-plugins
+    routes:
+      - name: listing-check-availability
+        uris:
+          - /listings/availability
+        methods:
+          - GET
+        plugins:
+          grpc-transcode:
+            proto_id: combined
+            service: listing.ListingService
+            method: CheckAvailability
