@@ -1,0 +1,22 @@
+FROM alpine:3.21 AS builder
+RUN apk add --no-cache protoc
+WORKDIR /work
+COPY proto/*.proto ./proto/
+RUN protoc --descriptor_set_out=combined.pb --include_imports proto/*.proto
+
+FROM debian:12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gettext-base && \
+    rm -rf /var/lib/apt/lists/*
+RUN ARCH=$(uname -m) && \
+    case "$ARCH" in \
+        x86_64) BIN="adc_0.26.0_linux_amd64.tar.gz" ;; \
+        aarch64) BIN="adc_0.26.0_linux_arm64.tar.gz" ;; \
+        *) echo "Unsupported arch: $ARCH"; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/api7/adc/releases/download/v0.26.0/${BIN}" \
+    | tar -xz -C /usr/local/bin/ ./adc
+COPY --from=builder /work/combined.pb /combined.pb
+COPY apisix/declarative.yaml /declarative.yaml
+COPY scripts/init-apisix.sh /init-apisix.sh
+ENTRYPOINT ["/init-apisix.sh"]

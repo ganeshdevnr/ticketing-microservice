@@ -71,21 +71,50 @@ services:
       keycloak-db:
         condition: service_healthy
 
+  etcd:
+    image: bitnamilegacy/etcd:3.6.4
+    environment:
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ENABLE_V2: "true"
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   apisix:
     image: apache/apisix:3.13.0-debian
     environment:
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-ticketing-app}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-qihxyWCo3XoBK0jwN6WxqCfmbWjm4WXt}
       KEYCLOAK_DISCOVERY_URL: http://keycloak:8080/realms/ticketing/.well-known/openid-configuration
-      ORDER_GRPC_UPSTREAM: order:50053
     ports:
       - "9080:9080"
     volumes:
       - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
-      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    healthcheck:
+      test: ["CMD", "test", "-f", "/usr/local/apisix/logs/nginx.pid"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     depends_on:
+      etcd:
+        condition: service_healthy
       jaeger:
         condition: service_started
+
+  apisix-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.apisix-init
+    environment:
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-ticketing-app}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-qihxyWCo3XoBK0jwN6WxqCfmbWjm4WXt}
+      KEYCLOAK_DISCOVERY_URL: http://keycloak:8080/realms/ticketing/.well-known/openid-configuration
+    depends_on:
+      apisix:
+        condition: service_healthy
 
   jaeger:
     image: jaegertracing/all-in-one:latest
