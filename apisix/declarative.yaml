@@ -49,16 +49,12 @@ services:
           weight: 1
     plugin_config_id: 1
     routes:
-      - name: order-post
+      - name: order-routes
         uris:
-          - /orders
-        methods:
-          - POST
+          - /orders/*
         plugins:
           grpc-transcode:
             proto_id: combined
-            service: order.OrderService
-            method: PlaceOrder
 
   - name: listing-service
     description: Listing service gRPC proxy
@@ -72,13 +68,9 @@ services:
           weight: 1
     plugin_config_id: 1
     routes:
-      - name: listing-check-availability
+      - name: listing-routes
         uris:
-          - /listings/availability
-        methods:
-          - GET
+          - /listings/*
         plugins:
           grpc-transcode:
             proto_id: combined
-            service: listing.ListingService
-            method: CheckAvailability

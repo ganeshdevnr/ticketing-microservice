@@ -14,8 +14,18 @@ service ListingService {
       get: "/listings/availability"
     };
   }
-  rpc ReserveSeats (ReserveSeatsRequest) returns (ReserveSeatsResponse);
-  rpc ReleaseSeats (ReleaseSeatsRequest) returns (ReleaseSeatsResponse);
+  rpc ReserveSeats (ReserveSeatsRequest) returns (ReserveSeatsResponse) {
+    option (google.api.http) = {
+      post: "/listings/reserve"
+      body: "*"
+    };
+  }
+  rpc ReleaseSeats (ReleaseSeatsRequest) returns (ReleaseSeatsResponse) {
+    option (google.api.http) = {
+      post: "/listings/release"
+      body: "*"
+    };
+  }
 }
 
 // Request message sent by the Order service client.
