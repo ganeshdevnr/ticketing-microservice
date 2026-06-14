@@ -2,10 +2,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import { SpanKind } from "@opentelemetry/api";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { listingDb } from "./listing/db.ts";
 import { events } from "./listing/schema.ts";
-import { getGrpcTraceId, tracePrefix } from "./trace.ts";
+import { getGrpcPropagationContext, getGrpcTraceId, runInSpan, tracePrefix } from "./trace.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,89 +68,95 @@ async function checkAvailability(
   call: grpc.ServerUnaryCall<CheckAvailabilityRequest, CheckAvailabilityResponse>,
   callback: grpc.sendUnaryData<CheckAvailabilityResponse>
 ) {
-  const trace = tracePrefix(getGrpcTraceId(call));
+  await runInSpan("listing.ListingService/CheckAvailability", SpanKind.SERVER, async () => {
+    const trace = tracePrefix(getGrpcTraceId(call));
 
-  try {
-    // Listing service reads only from its own database.
-    const event = await listingDb.query.events.findFirst({
-      where: eq(events.eventId, call.request.eventId)
-    });
-    const availableSeats = event?.availableSeats ?? 0;
+    try {
+      // Listing service reads only from its own database.
+      const event = await listingDb.query.events.findFirst({
+        where: eq(events.eventId, call.request.eventId)
+      });
+      const availableSeats = event?.availableSeats ?? 0;
 
-    console.log(`${trace} checked availability for event ${call.request.eventId}, available seats: ${availableSeats}`);
+      console.log(`${trace} checked availability for event ${call.request.eventId}, available seats: ${availableSeats}`);
 
-    callback(null, {
-      available: availableSeats > 0,
-      availableSeats
-    });
-  } catch (error) {
-    console.error(`${trace} failed to check availability for event ${call.request.eventId}:`, error);
-    callback(error as Error);
-  }
+      callback(null, {
+        available: availableSeats > 0,
+        availableSeats
+      });
+    } catch (error) {
+      console.error(`${trace} failed to check availability for event ${call.request.eventId}:`, error);
+      callback(error as Error);
+    }
+  }, getGrpcPropagationContext(call.metadata));
 }
 
 async function reserveSeats(
   call: grpc.ServerUnaryCall<ReserveSeatsRequest, ReserveSeatsResponse>,
   callback: grpc.sendUnaryData<ReserveSeatsResponse>
 ) {
-  const trace = tracePrefix(getGrpcTraceId(call));
+  await runInSpan("listing.ListingService/ReserveSeats", SpanKind.SERVER, async () => {
+    const trace = tracePrefix(getGrpcTraceId(call));
 
-  try {
-    const [event] = await listingDb
-      .update(events)
-      .set({
-        availableSeats: sql`${events.availableSeats} - ${call.request.seats}`,
-        reservedSeats: sql`${events.reservedSeats} + ${call.request.seats}`
-      })
-      .where(and(eq(events.eventId, call.request.eventId), gte(events.availableSeats, call.request.seats)))
-      .returning({ availableSeats: events.availableSeats });
+    try {
+      const [event] = await listingDb
+        .update(events)
+        .set({
+          availableSeats: sql`${events.availableSeats} - ${call.request.seats}`,
+          reservedSeats: sql`${events.reservedSeats} + ${call.request.seats}`
+        })
+        .where(and(eq(events.eventId, call.request.eventId), gte(events.availableSeats, call.request.seats)))
+        .returning({ availableSeats: events.availableSeats });
 
-    if (event) {
-      console.log(`${trace} reserved seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
-    } else {
-      console.log(`${trace} failed to reserve seats for event ${call.request.eventId}`);
+      if (event) {
+        console.log(`${trace} reserved seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
+      } else {
+        console.log(`${trace} failed to reserve seats for event ${call.request.eventId}`);
+      }
+
+      callback(null, {
+        reserved: Boolean(event),
+        availableSeats: event?.availableSeats ?? 0
+      });
+    } catch (error) {
+      console.error(`${trace} failed to reserve seats for event ${call.request.eventId}:`, error);
+      callback(error as Error);
     }
-
-    callback(null, {
-      reserved: Boolean(event),
-      availableSeats: event?.availableSeats ?? 0
-    });
-  } catch (error) {
-    console.error(`${trace} failed to reserve seats for event ${call.request.eventId}:`, error);
-    callback(error as Error);
-  }
+  }, getGrpcPropagationContext(call.metadata));
 }
 
 async function releaseSeats(
   call: grpc.ServerUnaryCall<ReleaseSeatsRequest, ReleaseSeatsResponse>,
   callback: grpc.sendUnaryData<ReleaseSeatsResponse>
 ) {
-  const trace = tracePrefix(getGrpcTraceId(call));
+  await runInSpan("listing.ListingService/ReleaseSeats", SpanKind.SERVER, async () => {
+    const trace = tracePrefix(getGrpcTraceId(call));
 
-  try {
-    const [event] = await listingDb
-      .update(events)
-      .set({
-        availableSeats: sql`${events.availableSeats} + ${call.request.seats}`,
-        reservedSeats: sql`${events.reservedSeats} - ${call.request.seats}`
-      })
-      .where(and(eq(events.eventId, call.request.eventId), gte(events.reservedSeats, call.request.seats)))
-      .returning({ availableSeats: events.availableSeats });
+    try {
+      const [event] = await listingDb
+        .update(events)
+        .set({
+          availableSeats: sql`${events.availableSeats} + ${call.request.seats}`,
+          reservedSeats: sql`${events.reservedSeats} - ${call.request.seats}`
+        })
+        .where(and(eq(events.eventId, call.request.eventId), gte(events.reservedSeats, call.request.seats)))
+        .returning({ availableSeats: events.availableSeats });
 
-    if (event) {
-      console.log(`${trace} released seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
-    } else {
-      console.log(`${trace} failed to release seats for event ${call.request.eventId}`);
+      if (event) {
+        console.log(`${trace} released seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
+      } else {
+        console.log(`${trace} failed to release seats for event ${call.request.eventId}`);
+      }
+
+      callback(null, {
+        released: Boolean(event),
+        availableSeats: event?.availableSeats ?? 0
+      });
+    } catch (error) {
+      console.error(`${trace} failed to release seats for event ${call.request.eventId}:`, error);
+      callback(error as Error);
     }
-
-    callback(null, {
-      released: Boolean(event),
-      availableSeats: event?.availableSeats ?? 0
-    });
-  } catch (error) {
-    console.error(`${trace} failed to release seats for event ${call.request.eventId}:`, error);
-    callback(error as Error);
-  }
+  }, getGrpcPropagationContext(call.metadata));
 }
 
 // Create a new gRPC server

@@ -4,10 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import { context, propagation } from "@opentelemetry/api";
+import { SpanKind } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { closeOrderDb, orderDb } from "./order/db.ts";
 import { orders, outbox } from "./order/schema.ts";
-import { getGrpcTraceId, grpcTraceMetadata, tracePrefix } from "./trace.ts";
+import { getGrpcPropagationContext, getGrpcTraceId, grpcTraceMetadata, runInSpan, tracePrefix } from "./trace.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -125,57 +127,72 @@ const paymentClient = new paymentProto.payment.PaymentService(
 );
 
 function reserveSeats(request: ReserveSeatsRequest, traceId: string) {
-  return new Promise<ReserveSeatsResponse>((resolve, reject) => {
-    listingClient.ReserveSeats(request, grpcTraceMetadata(traceId), (error, response) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+  return runInSpan(
+    "listing.ListingService/ReserveSeats",
+    SpanKind.CLIENT,
+    () =>
+      new Promise<ReserveSeatsResponse>((resolve, reject) => {
+        listingClient.ReserveSeats(request, grpcTraceMetadata(traceId), (error, response) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-      if (!response) {
-        reject(new Error("Listing service returned no reserve response."));
-        return;
-      }
+          if (!response) {
+            reject(new Error("Listing service returned no reserve response."));
+            return;
+          }
 
-      resolve(response);
-    });
-  });
+          resolve(response);
+        });
+      })
+  );
 }
 
 function releaseSeats(request: ReleaseSeatsRequest, traceId: string) {
-  return new Promise<ReleaseSeatsResponse>((resolve, reject) => {
-    listingClient.ReleaseSeats(request, grpcTraceMetadata(traceId), (error, response) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+  return runInSpan(
+    "listing.ListingService/ReleaseSeats",
+    SpanKind.CLIENT,
+    () =>
+      new Promise<ReleaseSeatsResponse>((resolve, reject) => {
+        listingClient.ReleaseSeats(request, grpcTraceMetadata(traceId), (error, response) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-      if (!response) {
-        reject(new Error("Listing service returned no release response."));
-        return;
-      }
+          if (!response) {
+            reject(new Error("Listing service returned no release response."));
+            return;
+          }
 
-      resolve(response);
-    });
-  });
+          resolve(response);
+        });
+      })
+  );
 }
 
 function charge(request: ChargeRequest, traceId: string) {
-  return new Promise<ChargeResponse>((resolve, reject) => {
-    paymentClient.Charge(request, grpcTraceMetadata(traceId), (error, response) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+  return runInSpan(
+    "payment.PaymentService/Charge",
+    SpanKind.CLIENT,
+    () =>
+      new Promise<ChargeResponse>((resolve, reject) => {
+        paymentClient.Charge(request, grpcTraceMetadata(traceId), (error, response) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-      if (!response) {
-        reject(new Error("Payment service returned no charge response."));
-        return;
-      }
+          if (!response) {
+            reject(new Error("Payment service returned no charge response."));
+            return;
+          }
 
-      resolve(response);
-    });
-  });
+          resolve(response);
+        });
+      })
+  );
 }
 
 async function createOrder(userId: string, traceId: string) {
@@ -210,6 +227,9 @@ async function createOrder(userId: string, traceId: string) {
     const payment = await charge({ orderId: order.id, amount: ORDER_AMOUNT }, traceId);
 
     if (payment.charged) {
+      const traceContext: Record<string, string> = {};
+      propagation.inject(context.active(), traceContext);
+
       await orderDb.transaction(async (tx) => {
         await tx.update(orders).set({ status: "confirmed" }).where(eq(orders.id, order.id));
         await tx.insert(outbox).values({
@@ -218,6 +238,7 @@ async function createOrder(userId: string, traceId: string) {
           payload: {
             id: randomUUID(),
             traceId,
+            traceContext,
             orderId: order.id,
             eventId: EVENT_ID_TO_CHECK,
             seats: SEATS_TO_RESERVE
@@ -261,24 +282,26 @@ async function placeOrder(
   call: grpc.ServerUnaryCall<PlaceOrderRequest, PlaceOrderResponse>,
   callback: grpc.sendUnaryData<PlaceOrderResponse>
 ) {
-  const userId = getUserIdFromMetadata(call.metadata);
-  const traceId = getGrpcTraceId(call);
-  const trace = tracePrefix(traceId);
+  await runInSpan("order.OrderService/PlaceOrder", SpanKind.SERVER, async () => {
+    const userId = getUserIdFromMetadata(call.metadata);
+    const traceId = getGrpcTraceId(call);
+    const trace = tracePrefix(traceId);
 
-  if (!userId) {
-    console.error(`${trace} Rejected order request: missing X-User-ID header`);
-    callback({ code: grpc.status.UNAUTHENTICATED, message: "missing X-User-ID" });
-    return;
-  }
+    if (!userId) {
+      console.error(`${trace} Rejected order request: missing X-User-ID header`);
+      callback({ code: grpc.status.UNAUTHENTICATED, message: "missing X-User-ID" });
+      return;
+    }
 
-  try {
-    const result = await createOrder(userId, traceId);
+    try {
+      const result = await createOrder(userId, traceId);
 
-    callback(null, result);
-  } catch (error) {
-    console.error(`${trace} Order saga failed:`, error);
-    callback({ code: grpc.status.INTERNAL, message: "order failed" });
-  }
+      callback(null, result);
+    } catch (error) {
+      console.error(`${trace} Order saga failed:`, error);
+      callback({ code: grpc.status.INTERNAL, message: "order failed" });
+    }
+  }, getGrpcPropagationContext(call.metadata));
 }
 
 const server = new grpc.Server();

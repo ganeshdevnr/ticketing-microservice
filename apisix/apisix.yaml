@@ -43,6 +43,9 @@ services:
         functions:
           - >-
             return function(conf, ctx) local userinfo = ngx.var.http_x_userinfo; if not userinfo then return ngx.exit(401) end; local decoded = ngx.decode_base64(userinfo); if not decoded then return ngx.exit(401) end; local cjson = require('cjson.safe'); local claims = cjson.decode(decoded); if not claims or type(claims.sub) ~= 'string' or claims.sub == '' then return ngx.exit(401) end; ngx.req.set_header('X-User-ID', claims.sub); ngx.req.clear_header('X-Userinfo') end
+      opentelemetry:
+        sampler:
+          name: always_on
     upstream:
       scheme: grpc
       type: roundrobin
@@ -60,4 +63,13 @@ routes:
         proto_id: order
         service: order.OrderService
         method: PlaceOrder
+
+plugin_metadata:
+  - id: opentelemetry
+    resource:
+      service.name: apisix-gateway
+    collector:
+      address: jaeger:4318
+      request_timeout: 3
+    set_ngx_var: false
 #END

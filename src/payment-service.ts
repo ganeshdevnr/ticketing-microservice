@@ -2,7 +2,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
-import { getGrpcTraceId, tracePrefix } from "./trace.ts";
+import { SpanKind } from "@opentelemetry/api";
+import { getGrpcPropagationContext, getGrpcTraceId, runInSpan, tracePrefix } from "./trace.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,16 +37,18 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 const paymentProto = grpc.loadPackageDefinition(packageDefinition) as unknown as PaymentProto;
 
 async function charge(call: grpc.ServerUnaryCall<ChargeRequest, ChargeResponse>, callback: grpc.sendUnaryData<ChargeResponse>) {
-  const trace = tracePrefix(getGrpcTraceId(call));
+  await runInSpan("payment.PaymentService/Charge", SpanKind.SERVER, async () => {
+    const trace = tracePrefix(getGrpcTraceId(call));
 
-  if (call.request.amount <= 0) {
-    console.log(`${trace} payment failed for order ${call.request.orderId}`);
-    callback(null, { charged: false, reason: "amount must be positive" });
-    return;
-  }
+    if (call.request.amount <= 0) {
+      console.log(`${trace} payment failed for order ${call.request.orderId}`);
+      callback(null, { charged: false, reason: "amount must be positive" });
+      return;
+    }
 
-  console.log(`${trace} payment charged for order ${call.request.orderId}`);
-  callback(null, { charged: true, reason: "" });
+    console.log(`${trace} payment charged for order ${call.request.orderId}`);
+    callback(null, { charged: true, reason: "" });
+  }, getGrpcPropagationContext(call.metadata));
 }
 
 const server = new grpc.Server();

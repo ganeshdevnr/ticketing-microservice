@@ -5,6 +5,7 @@ plugins:
   - openid-connect
   - grpc-transcode
   - serverless-pre-function
+  - opentelemetry
 
 deployment:
   role: data_plane

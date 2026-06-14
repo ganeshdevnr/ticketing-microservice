@@ -1,3 +1,5 @@
+import { context, propagation, SpanKind, SpanStatusCode, trace, type TextMapGetter } from "@opentelemetry/api";
+import type { IHeaders } from "kafkajs";
 import { kafka, ORDER_CREATED_TOPIC } from "./kafka.ts";
 import { notificationDb } from "./notification/db.ts";
 import { processedEvents } from "./notification/schema.ts";
@@ -6,12 +8,29 @@ import { tracePrefix } from "./trace.ts";
 type OrderCreatedEvent = {
   id: string;
   traceId?: string;
+  traceContext?: Record<string, string>;
   orderId: number;
   eventId: string;
   seats: number;
 };
 
 const consumer = kafka.consumer({ groupId: "notification-service" });
+const tracer = trace.getTracer("notification-service");
+
+const kafkaHeaderGetter: TextMapGetter<IHeaders> = {
+  keys(carrier) {
+    return Object.keys(carrier);
+  },
+  get(carrier, key) {
+    const value = carrier[key];
+
+    if (Array.isArray(value)) {
+      return value.map((item) => item.toString());
+    }
+
+    return value?.toString();
+  }
+};
 
 await consumer.connect();
 await consumer.subscribe({ topic: ORDER_CREATED_TOPIC, fromBeginning: false });
@@ -24,22 +43,48 @@ await consumer.run({
       return;
     }
 
-    const event = JSON.parse(message.value.toString()) as OrderCreatedEvent;
-    const trace = tracePrefix(event.traceId ?? "missing-trace-id");
+    const messageValue = message.value;
+    const parentContext = propagation.extract(context.active(), message.headers ?? {}, kafkaHeaderGetter);
 
-    await notificationDb.transaction(async (tx) => {
-      const [processedEvent] = await tx
-        .insert(processedEvents)
-        .values({ eventId: event.id })
-        .onConflictDoNothing()
-        .returning({ eventId: processedEvents.eventId });
+    await context.with(parentContext, async () => {
+      await tracer.startActiveSpan(
+        `kafka consume ${ORDER_CREATED_TOPIC}`,
+        {
+          kind: SpanKind.CONSUMER,
+          attributes: {
+            "messaging.system": "kafka",
+            "messaging.destination.name": ORDER_CREATED_TOPIC,
+            "messaging.operation.name": "consume"
+          }
+        },
+        async (span) => {
+          try {
+            const event = JSON.parse(messageValue.toString()) as OrderCreatedEvent;
+            const trace = tracePrefix(event.traceId ?? "missing-trace-id");
 
-      if (!processedEvent) {
-        console.log(`${trace} duplicate OrderCreated event ${event.id}, ignoring`);
-        return;
-      }
+            await notificationDb.transaction(async (tx) => {
+              const [processedEvent] = await tx
+                .insert(processedEvents)
+                .values({ eventId: event.id })
+                .onConflictDoNothing()
+                .returning({ eventId: processedEvents.eventId });
 
-      console.log(`${trace} sending confirmation for order ${event.orderId}`);
+              if (!processedEvent) {
+                console.log(`${trace} duplicate OrderCreated event ${event.id}, ignoring`);
+                return;
+              }
+
+              console.log(`${trace} sending confirmation for order ${event.orderId}`);
+            });
+          } catch (error) {
+            span.recordException(error as Error);
+            span.setStatus({ code: SpanStatusCode.ERROR });
+            throw error;
+          } finally {
+            span.end();
+          }
+        }
+      );
     });
   }
 });
