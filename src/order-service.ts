@@ -4,10 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import { context, propagation } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { closeOrderDb, orderDb } from "./order/db.ts";
 import { orders, outbox } from "./order/schema.ts";
-import { getGrpcTraceId, grpcTraceMetadata, tracePrefix } from "./trace.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -124,9 +124,9 @@ const paymentClient = new paymentProto.payment.PaymentService(
   grpc.credentials.createInsecure()
 );
 
-function reserveSeats(request: ReserveSeatsRequest, traceId: string) {
+function reserveSeats(request: ReserveSeatsRequest) {
   return new Promise<ReserveSeatsResponse>((resolve, reject) => {
-    listingClient.ReserveSeats(request, grpcTraceMetadata(traceId), (error, response) => {
+    listingClient.ReserveSeats(request, new grpc.Metadata(), (error, response) => {
       if (error) {
         reject(error);
         return;
@@ -142,9 +142,9 @@ function reserveSeats(request: ReserveSeatsRequest, traceId: string) {
   });
 }
 
-function releaseSeats(request: ReleaseSeatsRequest, traceId: string) {
+function releaseSeats(request: ReleaseSeatsRequest) {
   return new Promise<ReleaseSeatsResponse>((resolve, reject) => {
-    listingClient.ReleaseSeats(request, grpcTraceMetadata(traceId), (error, response) => {
+    listingClient.ReleaseSeats(request, new grpc.Metadata(), (error, response) => {
       if (error) {
         reject(error);
         return;
@@ -160,9 +160,9 @@ function releaseSeats(request: ReleaseSeatsRequest, traceId: string) {
   });
 }
 
-function charge(request: ChargeRequest, traceId: string) {
+function charge(request: ChargeRequest) {
   return new Promise<ChargeResponse>((resolve, reject) => {
-    paymentClient.Charge(request, grpcTraceMetadata(traceId), (error, response) => {
+    paymentClient.Charge(request, new grpc.Metadata(), (error, response) => {
       if (error) {
         reject(error);
         return;
@@ -178,9 +178,7 @@ function charge(request: ChargeRequest, traceId: string) {
   });
 }
 
-async function createOrder(userId: string, traceId: string) {
-  const trace = tracePrefix(traceId);
-
+async function createOrder(userId: string) {
   const [order] = await orderDb
     .insert(orders)
     .values({
@@ -193,23 +191,26 @@ async function createOrder(userId: string, traceId: string) {
     throw new Error("Order service did not receive a stored order response.");
   }
 
-  console.log(`${trace} Order request accepted for user ${userId}`);
-  console.log(`${trace} Order stored in Order service database with id: ${order.id}`);
-  console.log(`${trace} Order status: pending`);
+  console.log(`Order request accepted for user ${userId}`);
+  console.log(`Order stored in Order service database with id: ${order.id}`);
+  console.log("Order status: pending");
 
-  const reserve = await reserveSeats({ eventId: EVENT_ID_TO_CHECK, seats: SEATS_TO_RESERVE }, traceId);
+  const reserve = await reserveSeats({ eventId: EVENT_ID_TO_CHECK, seats: SEATS_TO_RESERVE });
 
   if (!reserve.reserved) {
     await orderDb.update(orders).set({ status: "failed_no_seats" }).where(eq(orders.id, order.id));
-    console.log(`${trace} failed to reserve seats for event ${EVENT_ID_TO_CHECK}`);
-    console.log(`${trace} Order status: failed_no_seats`);
+    console.log(`failed to reserve seats for event ${EVENT_ID_TO_CHECK}`);
+    console.log("Order status: failed_no_seats");
     return { orderId: order.id, status: "failed_no_seats" };
   } else {
-    console.log(`${trace} reserved seats for event ${EVENT_ID_TO_CHECK}`);
+    console.log(`reserved seats for event ${EVENT_ID_TO_CHECK}`);
 
-    const payment = await charge({ orderId: order.id, amount: ORDER_AMOUNT }, traceId);
+    const payment = await charge({ orderId: order.id, amount: ORDER_AMOUNT });
 
     if (payment.charged) {
+      const traceContext: Record<string, string> = {};
+      propagation.inject(context.active(), traceContext);
+
       await orderDb.transaction(async (tx) => {
         await tx.update(orders).set({ status: "confirmed" }).where(eq(orders.id, order.id));
         await tx.insert(outbox).values({
@@ -217,7 +218,7 @@ async function createOrder(userId: string, traceId: string) {
           eventType: "OrderCreated",
           payload: {
             id: randomUUID(),
-            traceId,
+            traceContext,
             orderId: order.id,
             eventId: EVENT_ID_TO_CHECK,
             seats: SEATS_TO_RESERVE
@@ -225,27 +226,27 @@ async function createOrder(userId: string, traceId: string) {
         });
       });
 
-      console.log(`${trace} payment charged`);
-      console.log(`${trace} Order status: confirmed`);
-      console.log(`${trace} Stored OrderCreated outbox event for order ${order.id}`);
+      console.log("payment charged");
+      console.log("Order status: confirmed");
+      console.log(`Stored OrderCreated outbox event for order ${order.id}`);
       return { orderId: order.id, status: "confirmed" };
     } else {
-      console.log(`${trace} payment failed`);
+      console.log("payment failed");
 
       try {
-        const release = await releaseSeats({ eventId: EVENT_ID_TO_CHECK, seats: SEATS_TO_RESERVE }, traceId);
+        const release = await releaseSeats({ eventId: EVENT_ID_TO_CHECK, seats: SEATS_TO_RESERVE });
 
         if (release.released) {
-          console.log(`${trace} released seats for event ${EVENT_ID_TO_CHECK}`);
+          console.log(`released seats for event ${EVENT_ID_TO_CHECK}`);
         } else {
-          console.error(`${trace} failed to release seats for event ${EVENT_ID_TO_CHECK}`);
+          console.error(`failed to release seats for event ${EVENT_ID_TO_CHECK}`);
         }
       } catch (releaseError) {
-        console.error(`${trace} failed to release seats for event ${EVENT_ID_TO_CHECK}:`, releaseError);
+        console.error(`failed to release seats for event ${EVENT_ID_TO_CHECK}:`, releaseError);
       }
 
       await orderDb.update(orders).set({ status: "failed_payment" }).where(eq(orders.id, order.id));
-      console.log(`${trace} Order status: failed_payment`);
+      console.log("Order status: failed_payment");
       return { orderId: order.id, status: "failed_payment" };
     }
   }
@@ -262,21 +263,19 @@ async function placeOrder(
   callback: grpc.sendUnaryData<PlaceOrderResponse>
 ) {
   const userId = getUserIdFromMetadata(call.metadata);
-  const traceId = getGrpcTraceId(call);
-  const trace = tracePrefix(traceId);
 
   if (!userId) {
-    console.error(`${trace} Rejected order request: missing X-User-ID header`);
+    console.error("Rejected order request: missing X-User-ID header");
     callback({ code: grpc.status.UNAUTHENTICATED, message: "missing X-User-ID" });
     return;
   }
 
   try {
-    const result = await createOrder(userId, traceId);
+    const result = await createOrder(userId);
 
     callback(null, result);
   } catch (error) {
-    console.error(`${trace} Order saga failed:`, error);
+    console.error("Order saga failed:", error);
     callback({ code: grpc.status.INTERNAL, message: "order failed" });
   }
 }

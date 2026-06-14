@@ -5,7 +5,6 @@ import * as protoLoader from "@grpc/proto-loader";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { listingDb } from "./listing/db.ts";
 import { events } from "./listing/schema.ts";
-import { getGrpcTraceId, tracePrefix } from "./trace.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,8 +66,6 @@ async function checkAvailability(
   call: grpc.ServerUnaryCall<CheckAvailabilityRequest, CheckAvailabilityResponse>,
   callback: grpc.sendUnaryData<CheckAvailabilityResponse>
 ) {
-  const trace = tracePrefix(getGrpcTraceId(call));
-
   try {
     // Listing service reads only from its own database.
     const event = await listingDb.query.events.findFirst({
@@ -76,14 +73,14 @@ async function checkAvailability(
     });
     const availableSeats = event?.availableSeats ?? 0;
 
-    console.log(`${trace} checked availability for event ${call.request.eventId}, available seats: ${availableSeats}`);
+    console.log(`checked availability for event ${call.request.eventId}, available seats: ${availableSeats}`);
 
     callback(null, {
       available: availableSeats > 0,
       availableSeats
     });
   } catch (error) {
-    console.error(`${trace} failed to check availability for event ${call.request.eventId}:`, error);
+    console.error(`failed to check availability for event ${call.request.eventId}:`, error);
     callback(error as Error);
   }
 }
@@ -92,8 +89,6 @@ async function reserveSeats(
   call: grpc.ServerUnaryCall<ReserveSeatsRequest, ReserveSeatsResponse>,
   callback: grpc.sendUnaryData<ReserveSeatsResponse>
 ) {
-  const trace = tracePrefix(getGrpcTraceId(call));
-
   try {
     const [event] = await listingDb
       .update(events)
@@ -105,9 +100,9 @@ async function reserveSeats(
       .returning({ availableSeats: events.availableSeats });
 
     if (event) {
-      console.log(`${trace} reserved seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
+      console.log(`reserved seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
     } else {
-      console.log(`${trace} failed to reserve seats for event ${call.request.eventId}`);
+      console.log(`failed to reserve seats for event ${call.request.eventId}`);
     }
 
     callback(null, {
@@ -115,7 +110,7 @@ async function reserveSeats(
       availableSeats: event?.availableSeats ?? 0
     });
   } catch (error) {
-    console.error(`${trace} failed to reserve seats for event ${call.request.eventId}:`, error);
+    console.error(`failed to reserve seats for event ${call.request.eventId}:`, error);
     callback(error as Error);
   }
 }
@@ -124,8 +119,6 @@ async function releaseSeats(
   call: grpc.ServerUnaryCall<ReleaseSeatsRequest, ReleaseSeatsResponse>,
   callback: grpc.sendUnaryData<ReleaseSeatsResponse>
 ) {
-  const trace = tracePrefix(getGrpcTraceId(call));
-
   try {
     const [event] = await listingDb
       .update(events)
@@ -137,9 +130,9 @@ async function releaseSeats(
       .returning({ availableSeats: events.availableSeats });
 
     if (event) {
-      console.log(`${trace} released seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
+      console.log(`released seats for event ${call.request.eventId}, available seats: ${event.availableSeats}`);
     } else {
-      console.log(`${trace} failed to release seats for event ${call.request.eventId}`);
+      console.log(`failed to release seats for event ${call.request.eventId}`);
     }
 
     callback(null, {
@@ -147,7 +140,7 @@ async function releaseSeats(
       availableSeats: event?.availableSeats ?? 0
     });
   } catch (error) {
-    console.error(`${trace} failed to release seats for event ${call.request.eventId}:`, error);
+    console.error(`failed to release seats for event ${call.request.eventId}:`, error);
     callback(error as Error);
   }
 }
