@@ -7,19 +7,11 @@ plugin_metadata:
       request_timeout: 3
     set_ngx_var: false
 
-services:
-  - name: order-service
-    description: Order service gRPC proxy
-    upstream:
-      name: order-upstream
-      scheme: grpc
-      type: roundrobin
-      nodes:
-        - host: order
-          port: 50053
-          weight: 1
-    plugins: &svc-plugins
-      openid-connect: &oidc-config
+plugin_configs:
+  - id: 1
+    desc: "shared auth and tracing plugins"
+    plugins:
+      openid-connect:
         client_id: ${KEYCLOAK_CLIENT_ID}
         client_secret: ${KEYCLOAK_CLIENT_SECRET}
         discovery: ${KEYCLOAK_DISCOVERY_URL}
@@ -36,13 +28,26 @@ services:
         set_access_token_header: false
         set_id_token_header: false
         set_userinfo_header: true
-      serverless-pre-function: &prefn-config
+      serverless-pre-function:
         phase: before_proxy
         functions:
           - 'return function(conf, ctx) local userinfo = ngx.var.http_x_userinfo; if not userinfo then return ngx.exit(401) end; local decoded = ngx.decode_base64(userinfo); if not decoded then return ngx.exit(401) end; local cjson = require("cjson.safe"); local claims = cjson.decode(decoded); if not claims or type(claims.sub) ~= "string" or claims.sub == "" then return ngx.exit(401) end; ngx.req.set_header("X-User-ID", claims.sub); ngx.req.clear_header("X-Userinfo") end'
-      opentelemetry: &otel-config
+      opentelemetry:
         sampler:
           name: always_on
+
+services:
+  - name: order-service
+    description: Order service gRPC proxy
+    upstream:
+      name: order-upstream
+      scheme: grpc
+      type: roundrobin
+      nodes:
+        - host: order
+          port: 50053
+          weight: 1
+    plugin_config_id: 1
     routes:
       - name: order-post
         uris:
@@ -65,7 +70,7 @@ services:
         - host: listing
           port: 50051
           weight: 1
-    plugins: *svc-plugins
+    plugin_config_id: 1
     routes:
       - name: listing-check-availability
         uris:
