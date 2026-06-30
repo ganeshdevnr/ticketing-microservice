@@ -14,10 +14,8 @@ services:
       name: order-upstream
       scheme: grpc
       type: roundrobin
-      nodes:
-        - host: order
-          port: 50053
-          weight: 1
+      discovery_type: consul
+      service_name: order
     plugins:
       openid-connect:
         client_id: ${KEYCLOAK_CLIENT_ID}
@@ -62,10 +60,8 @@ services:
       name: listing-upstream
       scheme: grpc
       type: roundrobin
-      nodes:
-        - host: listing
-          port: 50051
-          weight: 1
+      discovery_type: consul
+      service_name: listing
     plugins:
       openid-connect:
         client_id: ${KEYCLOAK_CLIENT_ID}

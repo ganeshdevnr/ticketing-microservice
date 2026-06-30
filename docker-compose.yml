@@ -185,10 +185,14 @@ services:
       LISTING_GRPC_BIND_ADDRESS: 0.0.0.0:50051
       OTEL_SERVICE_NAME: listing-service
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      CONSUL_HTTP_ADDR: http://consul:8500
+      CONSUL_SERVICE_NAME: listing
     depends_on:
       db-setup:
         condition: service_completed_successfully
       jaeger:
+        condition: service_started
+      consul:
         condition: service_started
 
   payment:
@@ -215,6 +219,8 @@ services:
       ORDER_AMOUNT: 100
       OTEL_SERVICE_NAME: order-service
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      CONSUL_HTTP_ADDR: http://consul:8500
+      CONSUL_SERVICE_NAME: order
     depends_on:
       db-setup:
         condition: service_completed_successfully
@@ -223,6 +229,8 @@ services:
       payment:
         condition: service_started
       jaeger:
+        condition: service_started
+      consul:
         condition: service_started
 
   order-outbox:

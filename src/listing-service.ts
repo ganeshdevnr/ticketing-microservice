@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { and, eq, gte, sql } from "drizzle-orm";
+import { registerWithConsul } from "./consul.ts";
 import { listingDb } from "./listing/db.ts";
 import { events } from "./listing/schema.ts";
 
@@ -159,6 +160,8 @@ server.addService(listingProto.listing.ListingService.service, {
   ReleaseSeats: releaseSeats
 });
 
+let deregisterFromConsul: (() => Promise<void>) | undefined;
+
 server.bindAsync(SERVER_ADDRESS, grpc.ServerCredentials.createInsecure(), (error, port) => {
   if (error) {
     console.error("Failed to start Listing service:", error);
@@ -167,4 +170,28 @@ server.bindAsync(SERVER_ADDRESS, grpc.ServerCredentials.createInsecure(), (error
 
   console.log(`Listing service listening on ${SERVER_ADDRESS}`);
   console.log(`gRPC server bound to port ${port}`);
+
+  void registerWithConsul({
+    name: process.env.CONSUL_SERVICE_NAME ?? "listing",
+    port
+  }).then((deregister) => {
+    deregisterFromConsul = deregister;
+  });
+});
+
+async function shutdown() {
+  if (deregisterFromConsul) {
+    await deregisterFromConsul();
+  }
+  await new Promise<void>((resolve) => {
+    server.tryShutdown(() => resolve());
+  });
+}
+
+process.on("SIGINT", () => {
+  void shutdown().finally(() => process.exit(0));
+});
+
+process.on("SIGTERM", () => {
+  void shutdown().finally(() => process.exit(0));
 });
