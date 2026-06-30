@@ -11,9 +11,10 @@ import { orders, outbox } from "./order/schema.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ORDER_PROTO_PATH = path.join(__dirname, "../proto/order.proto");
-const LISTING_PROTO_PATH = path.join(__dirname, "../proto/listing.proto");
-const PAYMENT_PROTO_PATH = path.join(__dirname, "../proto/payment.proto");
+const PROTO_ROOT = path.join(__dirname, "../proto");
+const ORDER_PROTO_PATH = "order.proto";
+const LISTING_PROTO_PATH = "listing.proto";
+const PAYMENT_PROTO_PATH = "payment.proto";
 const ORDER_SERVER_ADDRESS = process.env.ORDER_GRPC_BIND_ADDRESS ?? "0.0.0.0:50053";
 const LISTING_SERVICE_ADDRESS = process.env.LISTING_SERVICE_ADDRESS ?? "localhost:50051";
 const PAYMENT_SERVICE_ADDRESS = process.env.PAYMENT_SERVICE_ADDRESS ?? "localhost:50052";
@@ -101,7 +102,8 @@ const protoLoaderOptions = {
   longs: String,
   enums: String,
   defaults: true,
-  oneofs: true
+  oneofs: true,
+  includeDirs: [PROTO_ROOT]
 };
 
 const orderProto = grpc.loadPackageDefinition(

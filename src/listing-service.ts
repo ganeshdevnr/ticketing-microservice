@@ -8,7 +8,8 @@ import { events } from "./listing/schema.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PROTO_PATH = path.join(__dirname, "../proto/listing.proto");
+const PROTO_ROOT = path.join(__dirname, "../proto");
+const PROTO_PATH = "listing.proto";
 const SERVER_ADDRESS = process.env.LISTING_GRPC_BIND_ADDRESS ?? "localhost:50051";
 
 
@@ -56,7 +57,8 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   longs: String,
   enums: String,
   defaults: true,
-  oneofs: true
+  oneofs: true,
+  includeDirs: [PROTO_ROOT]
 });
 
 const listingProto = grpc.loadPackageDefinition(packageDefinition) as unknown as ListingProto;
