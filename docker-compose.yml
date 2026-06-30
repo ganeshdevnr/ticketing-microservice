@@ -83,6 +83,13 @@ services:
       timeout: 3s
       retries: 10
 
+  consul:
+    image: hashicorp/consul:latest
+    container_name: consul
+    command: agent -dev -client=0.0.0.0
+    ports:
+      - "8500:8500"
+
   apisix:
     image: apache/apisix:3.13.0-debian
     environment:
@@ -91,6 +98,7 @@ services:
       KEYCLOAK_DISCOVERY_URL: http://keycloak:8080/realms/ticketing/.well-known/openid-configuration
     ports:
       - "9080:9080"
+      - "9090:9090"
     volumes:
       - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
     healthcheck:
