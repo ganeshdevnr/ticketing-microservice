@@ -19,6 +19,7 @@ The project models a small ticket ordering flow:
 - Service-owned databases with separate Listing, Order, and Notification Postgres databases.
 - Synchronous service-to-service calls with gRPC and `.proto` contracts.
 - API gateway routing with Apache APISIX and `grpc-transcode`.
+- Dynamic service discovery with Consul and APISIX — see [Service Discovery with Consul](docs/consul-service-discovery.md).
 - Bearer-token authentication with APISIX OpenID Connect and Keycloak.
 - Saga-style order flow with compensating seat release on payment failure.
 - Transactional outbox for reliable event publishing after database commits.
@@ -264,6 +265,18 @@ The public HTTP route is defined in `apisix/apisix.yaml`:
 - APISIX uses `grpc-transcode` to translate JSON HTTP requests into gRPC calls
 - APISIX uses `openid-connect` to require a bearer token
 - APISIX uses `serverless-pre-function` to derive `X-User-ID` from Keycloak user info
+
+## Service Discovery
+
+Instead of hardcoding backend addresses in the gateway, `listing` and `order`
+self-register with **Consul** on startup, and APISIX discovers them dynamically
+(`discovery_type: consul` + `service_name` in `apisix/declarative.yaml`). Consul TCP
+health-checks each instance and prunes dead ones.
+
+The full write-up — architecture, the self-registration vs sidecar decision, the
+`name` that joins the gateway config to the registry, the IP-vs-hostname gotcha that
+caused a `502 no host allowed`, health-check lifecycle, debugging commands, and
+tradeoffs — is in **[Service Discovery with Consul](docs/consul-service-discovery.md)**.
 
 ## Data Patterns
 

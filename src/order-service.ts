@@ -6,6 +6,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { context, propagation } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
+import { registerWithConsul } from "./consul.ts";
 import { closeOrderDb, orderDb } from "./order/db.ts";
 import { orders, outbox } from "./order/schema.ts";
 
@@ -288,6 +289,8 @@ server.addService(orderProto.order.OrderService.service, {
   PlaceOrder: placeOrder
 });
 
+let deregisterFromConsul: (() => Promise<void>) | undefined;
+
 server.bindAsync(ORDER_SERVER_ADDRESS, grpc.ServerCredentials.createInsecure(), (error, port) => {
   if (error) {
     console.error("Failed to start Order service:", error);
@@ -296,9 +299,19 @@ server.bindAsync(ORDER_SERVER_ADDRESS, grpc.ServerCredentials.createInsecure(), 
 
   console.log(`Order service listening on ${ORDER_SERVER_ADDRESS}`);
   console.log(`gRPC server bound to port ${port}`);
+
+  void registerWithConsul({
+    name: process.env.CONSUL_SERVICE_NAME ?? "order",
+    port
+  }).then((deregister) => {
+    deregisterFromConsul = deregister;
+  });
 });
 
 async function shutdown() {
+  if (deregisterFromConsul) {
+    await deregisterFromConsul();
+  }
   await new Promise<void>((resolve) => {
     server.tryShutdown(() => resolve());
   });
