@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package listing;
 
-import "google/api/annotations.proto";
 
 // Shared gRPC contract used by both services.
 // Listing service implements this service on the server side.

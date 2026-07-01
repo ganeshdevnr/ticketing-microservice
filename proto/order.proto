@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package order;
 
-import "google/api/annotations.proto";
 
 service OrderService {
   rpc PlaceOrder (PlaceOrderRequest) returns (PlaceOrderResponse);
