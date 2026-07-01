@@ -195,6 +195,14 @@ services:
       consul:
         condition: service_started
 
+  grpc-json-transcoder:
+    build:
+      context: .
+      dockerfile: Dockerfile.grpc-json-transcoder
+    depends_on:
+      listing:
+        condition: service_started
+
   payment:
     build:
       context: .

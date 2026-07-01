@@ -57,44 +57,19 @@ services:
             method: PlaceOrder
 
   - name: listing-service
-    description: Listing service gRPC proxy
+    description: Listing service JSON-to-gRPC proxy through Envoy
     upstream:
-      name: listing-upstream
-      scheme: grpc
+      name: listing-transcoder-upstream
+      scheme: http
       type: roundrobin
-      discovery_type: consul
-      service_name: listing
+      nodes:
+        - host: grpc-json-transcoder
+          port: 8080
+          weight: 1
     routes:
-      - name: listing-check-availability
+      - name: listing-json-api
         uris:
-          - /listings/availability
+          - /listings/*
         methods:
           - GET
-        plugins:
-          grpc-transcode:
-            _state: enabled
-            proto_id: combined
-            service: listing.ListingService
-            method: CheckAvailability
-      - name: listing-reserve-seats
-        uris:
-          - /listings/reserve
-        methods:
           - POST
-        plugins:
-          grpc-transcode:
-            _state: enabled
-            proto_id: combined
-            service: listing.ListingService
-            method: ReserveSeats
-      - name: listing-release-seats
-        uris:
-          - /listings/release
-        methods:
-          - POST
-        plugins:
-          grpc-transcode:
-            _state: enabled
-            proto_id: combined
-            service: listing.ListingService
-            method: ReleaseSeats

@@ -1,0 +1,10 @@
+FROM alpine:3.21 AS descriptor
+RUN apk add --no-cache protoc protobuf-dev
+WORKDIR /work
+COPY proto/ ./proto/
+RUN protoc -I proto --descriptor_set_out=combined.pb --include_imports proto/*.proto
+
+FROM envoyproxy/envoy:v1.31-latest
+COPY --from=descriptor /work/combined.pb /etc/envoy/combined.pb
+COPY envoy/grpc-json-transcoder.yaml /etc/envoy/envoy.yaml
+CMD ["envoy", "-c", "/etc/envoy/envoy.yaml"]
