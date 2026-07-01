@@ -7,6 +7,33 @@ plugin_metadata:
       request_timeout: 3
     set_ngx_var: false
 
+
+global_rules:
+  openid-connect:
+    client_id: ${KEYCLOAK_CLIENT_ID}
+    client_secret: ${KEYCLOAK_CLIENT_SECRET}
+    discovery: ${KEYCLOAK_DISCOVERY_URL}
+    realm: ticketing
+    bearer_only: true
+    use_jwks: true
+    token_signing_alg_values_expected: RS256
+    claim_validator:
+      issuer:
+        valid_issuers:
+          - http://localhost:8080/realms/ticketing
+    ssl_verify: false
+    unauth_action: deny
+    set_access_token_header: false
+    set_id_token_header: false
+    set_userinfo_header: true
+  serverless-pre-function:
+    phase: before_proxy
+    functions:
+      - 'return function(conf, ctx) local userinfo = ngx.var.http_x_userinfo; if not userinfo then return ngx.exit(401) end; local decoded = ngx.decode_base64(userinfo); if not decoded then return ngx.exit(401) end; local cjson = require("cjson.safe"); local claims = cjson.decode(decoded); if not claims or type(claims.sub) ~= "string" or claims.sub == "" then return ngx.exit(401) end; ngx.req.set_header("X-User-ID", claims.sub); ngx.req.clear_header("X-Userinfo") end'
+  opentelemetry:
+    sampler:
+      name: always_on
+
 services:
   - name: order-service
     description: Order service gRPC proxy
@@ -16,31 +43,6 @@ services:
       type: roundrobin
       discovery_type: consul
       service_name: order
-    plugins:
-      openid-connect:
-        client_id: ${KEYCLOAK_CLIENT_ID}
-        client_secret: ${KEYCLOAK_CLIENT_SECRET}
-        discovery: ${KEYCLOAK_DISCOVERY_URL}
-        realm: ticketing
-        bearer_only: true
-        use_jwks: true
-        token_signing_alg_values_expected: RS256
-        claim_validator:
-          issuer:
-            valid_issuers:
-              - http://localhost:8080/realms/ticketing
-        ssl_verify: false
-        unauth_action: deny
-        set_access_token_header: false
-        set_id_token_header: false
-        set_userinfo_header: true
-      serverless-pre-function:
-        phase: before_proxy
-        functions:
-          - 'return function(conf, ctx) local userinfo = ngx.var.http_x_userinfo; if not userinfo then return ngx.exit(401) end; local decoded = ngx.decode_base64(userinfo); if not decoded then return ngx.exit(401) end; local cjson = require("cjson.safe"); local claims = cjson.decode(decoded); if not claims or type(claims.sub) ~= "string" or claims.sub == "" then return ngx.exit(401) end; ngx.req.set_header("X-User-ID", claims.sub); ngx.req.clear_header("X-Userinfo") end'
-      opentelemetry:
-        sampler:
-          name: always_on
     routes:
       - name: order-place-order
         uris:
@@ -62,31 +64,6 @@ services:
       type: roundrobin
       discovery_type: consul
       service_name: listing
-    plugins:
-      openid-connect:
-        client_id: ${KEYCLOAK_CLIENT_ID}
-        client_secret: ${KEYCLOAK_CLIENT_SECRET}
-        discovery: ${KEYCLOAK_DISCOVERY_URL}
-        realm: ticketing
-        bearer_only: true
-        use_jwks: true
-        token_signing_alg_values_expected: RS256
-        claim_validator:
-          issuer:
-            valid_issuers:
-              - http://localhost:8080/realms/ticketing
-        ssl_verify: false
-        unauth_action: deny
-        set_access_token_header: false
-        set_id_token_header: false
-        set_userinfo_header: true
-      serverless-pre-function:
-        phase: before_proxy
-        functions:
-          - 'return function(conf, ctx) local userinfo = ngx.var.http_x_userinfo; if not userinfo then return ngx.exit(401) end; local decoded = ngx.decode_base64(userinfo); if not decoded then return ngx.exit(401) end; local cjson = require("cjson.safe"); local claims = cjson.decode(decoded); if not claims or type(claims.sub) ~= "string" or claims.sub == "" then return ngx.exit(401) end; ngx.req.set_header("X-User-ID", claims.sub); ngx.req.clear_header("X-Userinfo") end'
-      opentelemetry:
-        sampler:
-          name: always_on
     routes:
       - name: listing-check-availability
         uris:
