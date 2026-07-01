@@ -5,12 +5,7 @@ package order;
 import "google/api/annotations.proto";
 
 service OrderService {
-  rpc PlaceOrder (PlaceOrderRequest) returns (PlaceOrderResponse) {
-    option (google.api.http) = {
-      post: "/orders"
-      body: "*"
-    };
-  }
+  rpc PlaceOrder (PlaceOrderRequest) returns (PlaceOrderResponse);
 }
 
 message PlaceOrderRequest {
